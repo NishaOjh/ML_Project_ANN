@@ -1,0 +1,104 @@
+ 
+# --- Introduction --- 
+print "ex 1 tension test"
+#1
+units       metal  
+dimension   3
+      
+      
+      
+boundary    p p p    # periodic along x,y,and z axes
+atom_style  atomic # store coordinates, velocities, atom IDs and types.
+
+atom_modify map hash
+
+#2
+read_data BNS_27_83.data
+
+
+#3
+pair_style tersoff
+
+pair_coeff * * BNC.tersoff B N
+
+
+timestep 0.0005 
+
+region edge_fixed block INF INF INF 1.451 INF INF units box
+group edge_fixed region edge_fixed
+
+region edge_tensile block INF INF 40.651 INF INF INF units box 
+group edge_tensile region edge_tensile 
+
+group others subtract all edge_fixed edge_tensile 
+ 
+
+#4
+print "Equilibration Stage (NVE dynamics at 1 K)"   
+
+fix 1 all temp/berendsen 300 300 $(100.0*dt) 
+fix 2 all nve 
+thermo_style custom step temp press pe pzz
+thermo 1000
+dump 1 all atom 500 Equilibration.lammpstrj #Visualize with VMD 5000
+run 500
+#run 50000     # time = 100000*.0005 = 50 ps
+
+unfix 1
+unfix 2
+undump 1
+
+#5
+
+
+reset_timestep 0
+# --- Run simulation --- 
+print "Start Pulling"
+
+#fix 1 all deform 1 z erate 0.001 units box
+
+fix 1 edge_fixed move linear 0.0 0.0 0.0 units box #fixation
+fix 1 edge_tensile move linear 0.0 0.05 0.0 units box #fixation (velocity = Angstroms/picosecond)
+fix 3 others nvt temp 300 300 $(100.0*dt) 
+
+
+
+# To calculate radial displcament so the Poission's Ratio 
+# Middle portion of the BNSheet is considered (164, 166, ...., 180 are the atoms in middle portion) 
+
+
+variable x196 equal x[196]
+variable y196 equal y[196]
+variable x221 equal x[221]
+variable y221 equal y[221]
+variable x12 equal x[12]
+variable y12 equal y[12]
+variable x242 equal x[242]
+variable y242 equal y[242]
+
+
+# strain
+variable Dis_tensile equal xcm(edge_tensile,y)   # xcm (group, dim) return components of the position  of the center of mass of the group.
+
+compute sig all stress/atom NULL    #sxx is on single atom 
+
+compute sigma all reduce sum c_sig[1] c_sig[2] c_sig[3] c_sig[4] c_sig[5] c_sig[6]    #sxx is on all the atoms
+
+variable PE equal pe
+
+variable von atom sqrt((((c_sig[1]-c_sig[2])^2+(c_sig[2]-c_sig[3])^2+(c_sig[1]-c_sig[3])^2)+((c_sig[4]^2+c_sig[5]^2+c_sig[6]^2)*6))/2)
+variable von_sum equal sqrt((((c_sigma[1]-c_sigma[2])^2+(c_sigma[2]-c_sigma[3])^2+(c_sigma[1]-c_sigma[3])^2)+((c_sigma[4]^2+c_sigma[5]^2+c_sigma[6]^2)*6))/2)
+
+fix 5 all print 500 "${Dis_tensile} ${von_sum} ${PE} $(c_sigma[1]) $(c_sigma[2]) $(c_sigma[3]) $(c_sigma[4]) $(c_sigma[5]) $(c_sigma[6])" file output1.dump
+
+fix 6 all print 500 "${x196} ${y196} ${x221} ${y221} ${x12} ${y12} ${x242} ${y242}" file output2.dump
+
+dump 1 all custom 1000 vvon.lammpstrj id type x y z v_von
+
+dump_modify 1 sort id
+
+run 4206000
+#run 1600000 # steps required to make strain equal 0.5%  (this uses default timstep fo metal = 0.001 ps) (Disp = timestep * run * velocity = 2.4321 A)
+
+print "All done"
+
